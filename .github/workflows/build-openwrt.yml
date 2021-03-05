@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [Lede_x86_64,Project_x86_64,Lienol_x86_64]
+        target: [openwrt]
 
      # [Lede_x86_64,Lede_gl_mt300n_v2,Lede_nanopi_r2s,Lede_nanopi_r4s,Lede_newifi_d2,p2w_r619ac_128m,Lede_phicomm_k2p,Lede_phicomm_n1,Lede_redmi_ac2100,Lede_wankeyun,Lede_wndr3800,Lede_wndr4300_v1,Lede_wr703n_v1,Lede_xiaomi_r3pro,Lede_xiaoyu_c5,Lede_Raspberry_Pi4]
 
@@ -82,13 +82,7 @@ jobs:
         echo "Updete_firmware=${Updete_firmware}" >> $GITHUB_ENV
         echo "Extension=${Extension}" >> $GITHUB_ENV
     
-    - name: 微信通知
-      uses: emon100/Action-Serverchan@v2
-      if: env.SERVERCHAN_SCKEY == 'true' || (github.event.inputs.wxtz == 'wxtz' && github.event.inputs.wxtz  != 'false')
-      with:
-        SCKEY: ${{ secrets.SCKEY }}
-        text: 主人"${{ env.WXFB_MESSAGE }}"编译开始啦
-        desp: 主人您要编译的["${{ env.WXFB_MESSAGE }}"]固件正在努力耕耘中,请耐心等待......
+    
     
     - name: 开始安装编译所需系统
       env:
@@ -112,11 +106,7 @@ jobs:
         git clone -b main --single-branch https://github.com/281677160/Custom openwrt/common
         chmod +x openwrt/common/* ./
     
-    - name: 公告（每次启动都读取最新内容，展开可以查看）
-      run: |
-        cd openwrt
-        echo "GITHUB_RELEASE=$(grep "https://github.com/[a-zA-Z0-9]" ${GITHUB_WORKSPACE}/.git/config | cut -c8-100)" >> $GITHUB_ENV
-        source common/common.sh && Diy_notice
+    
     
     - name: 加载源,patch补丁和自定义设置
       run: |
@@ -235,22 +225,7 @@ jobs:
         name: OpenWrt_bin_${{ env.NAME2 }}${{ env.NAME1 }}_${{ env.date }}
         path: openwrt/bin
 
-    - name: 编译N1机型时,打包（N1、微加云、贝壳云、我家云、S9xxx）固件
-      run: |
-        cd openwrt
-        if [[ ${{matrix.target}} =~ (Lede_phicomm_n1|Project_phicomm_n1) ]]; then
-          source common/common.sh && Diy_n1
-         cd out
-         for x in ${devices[*]}; do
-           cd $x
-           filename=$(ls | awk -F '.img' '{print $1}')
-           gzip *.img
-           cd ../
-           echo "firmware_$x=$filename" >> $GITHUB_ENV
-         done
-           cd ../../
-           mv -f reform/out/*/*.img.gz openwrt/bin/targets/armvirt/*
-        fi
+    
     
     - name: 整理固件文件夹
       id: organizer
@@ -291,78 +266,4 @@ jobs:
         name: OpenWrt-${{ env.NAME2 }}${{ env.NAME1 }}-firmware-${{ env.date }}
         path: ${{ env.FIRMWARE }}
 
-    - name: 上传固件到「奶牛快传」和「WeTransfer」
-      if: steps.organizer.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
-      run: |
-        curl -fsSL git.io/file-transfer | sh
-        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
-        echo "::warning file=奶牛快传（${{matrix.target}}）::$(cat cowtransfer.log | grep https)"
-        curl -fsSL git.io/file-transfer | sh
-        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
-        echo "::warning file=WeTransfer（${{matrix.target}}）::$(cat wetransfer.log | grep https)"
     
-    - name: 提取发布用的「奶牛快传」跟「WeTransfer」的链接
-      if: steps.organizer.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' || (github.event.inputs.release == 'release' && github.event.inputs.release  != 'false')
-      run: |
-        curl -fsSL git.io/file-transfer | sh
-        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
-        echo "COWTRANSFER_URL=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_ENV
-        curl -fsSL git.io/file-transfer | sh
-        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
-        echo "WETRANSFER_URL=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_ENV
-    
-    - name: 自动发布固件
-      uses: softprops/action-gh-release@v1
-      if: steps.organizer.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' || (github.event.inputs.release == 'release' && github.event.inputs.release  != 'false')
-      env:
-        GITHUB_TOKEN: ${{ secrets.REPO_TOKEN }}
-      with:
-        name: ${{ env.date1 }} 「 ${{ env.WXFB_MESSAGE }} 」固件
-        tag_name: ${{ env.date2 }}
-        body: |
-            ☆  源码 : ${{ env.REPO_URL }}
-            ☆  分支 : ${{ env.REPO_BRANCH }}
-            ☆  感谢源码作者[ ${{ env.ZUOZHE }}大神 ]无私分享！
-            
-            🎉 [ ${{ env.NAME2 }}${{ env.NAME1 }} ]固件下载 ✨
-            -
-            💐 奶牛快传(国内高速🚀下载)： ${{ env.COWTRANSFER_URL }}
-            
-            ⛄ WeTransfer(国外高速🚀下载)： ${{ env.WETRANSFER_URL }}
-            
-            🌴 链接有效期为7天，无需注册直接下载 🐤
-        files: ${{ env.FIRMWARE }}/*
-    
-    - name: 发布定时升级云端地址
-      uses: softprops/action-gh-release@v1
-      if: steps.compile.outputs.status == 'success' && env.REGULAR_UPDATE == 'true'
-      env:
-        GITHUB_TOKEN: ${{ secrets.REPO_TOKEN }}
-      with:
-        name: 定时升级云端地址
-        tag_name: update_Firmware
-        body: ${{ env.log1 }}-${{ env.log2 }}-${{ env.log3 }}（完成时间-${{ env.date }}）
-        files: openwrt/bin/Firmware/*
-    
-    - name: 微信通知
-      uses: emon100/Action-Serverchan@v2
-      if: steps.organizer.outputs.status == 'success' && env.SERVERCHAN_SCKEY == 'true' || (github.event.inputs.wxtz == 'wxtz' && github.event.inputs.wxtz  != 'false')
-      with:
-        SCKEY: ${{ secrets.SCKEY }}
-        text: 恭喜主人${{ env.WXFB_MESSAGE }}固件编译成功！
-        desp: 我亲爱的主人您要编译的[ ${{ env.NAME2 }}${{ env.NAME1 }} ]固件顺利编译完成了！
-              
-              
-              完成时间：${{ env.date1 }}
-              
-              
-              发布地址：${{ env.GITHUB_RELEASE }}/releases
-              
-              
-              奶牛快传：${{ env.COWTRANSFER_URL }}
-              
-              
-              WeTransfer：${{ env.WETRANSFER_URL }}
-              
-              
-              祝小主人见人爱，花见花开，车见车载，天天好心情🎈！！！
